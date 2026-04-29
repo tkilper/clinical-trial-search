@@ -1,0 +1,295 @@
+read ================================================================================
+BIOTECH + AI PORTFOLIO BUILD PLAN
+Projects: Clinical Trial Semantic Search + Genomic Variant Interpretation
+================================================================================
+
+OVERVIEW
+--------
+Two projects designed to demonstrate data engineering skills with a natural
+progression toward AI/ML engineering. Built sequentially — Project 2 lays
+the infrastructure foundation that Project 6 builds on.
+
+
+================================================================================
+PROJECT 2: CLINICAL TRIAL SEMANTIC SEARCH ENGINE
+================================================================================
+
+GOAL
+----
+A searchable interface over ClinicalTrials.gov data that lets users find
+relevant trials using natural language descriptions of symptoms, mechanisms,
+or patient profiles — not just keyword matching.
+
+SKILLS DEMONSTRATED
+-------------------
+- Ingesting and normalizing a large, messy public dataset
+- Designing an embedding pipeline
+- Vector DB schema design and index tuning
+- Chunking strategy decisions (and documenting tradeoffs)
+- Building a simple retrieval interface
+
+DATA SOURCE
+-----------
+- ClinicalTrials.gov bulk download (JSON or XML, ~500k+ trials)
+  https://clinicaltrials.gov/data-api/api
+
+STACK
+-----
+- Storage:        PostgreSQL (raw/staging) + Qdrant or pgvector (vectors)
+- Embeddings:     BioBERT or PubMedBERT via HuggingFace (free, domain-specific)
+- Orchestration:  Python scripts or Prefect for pipeline steps
+- Interface:      Simple FastAPI endpoint or Streamlit app for querying
+
+--------------------------------------------------------------------------------
+PHASE 1: DATA INGESTION + NORMALIZATION
+--------------------------------------------------------------------------------
+
+Step 1 - Acquire the data
+  - Download ClinicalTrials.gov full dataset (bulk JSON)
+  - Inspect the schema: understand which fields exist, which are sparse
+  - Load raw records into PostgreSQL staging table as-is
+
+Step 2 - Explore and profile the data
+  - Identify key fields: title, brief_summary, eligibility_criteria,
+    conditions, interventions, phase, status, sponsor
+  - Document nulls, inconsistent formats, truncated text
+  - Decide which fields are worth embedding vs. filtering by
+
+Step 3 - Normalize into a clean schema
+  - Design a normalized relational schema:
+      trials (id, title, phase, status, start_date, sponsor)
+      conditions (trial_id, condition_name, mesh_term)
+      interventions (trial_id, name, type, description)
+      eligibility (trial_id, criteria_text, min_age, max_age, gender)
+  - Write ETL to populate clean tables from staging
+  - Handle edge cases: missing summaries, multi-value fields, date formats
+
+Step 4 - Enrich with MeSH ontology (optional but valuable)
+  - Download MeSH descriptor files from NLM
+  - Map condition names to standardized MeSH terms
+  - This enables structured filtering on top of semantic search
+
+--------------------------------------------------------------------------------
+PHASE 2: EMBEDDING PIPELINE
+--------------------------------------------------------------------------------
+
+Step 5 - Design chunking strategy
+  - Decide what text to embed per trial:
+      Option A: title + brief_summary only (simple, fast)
+      Option B: title + summary + eligibility criteria (richer, noisier)
+      Option C: one chunk per section, store separately (most flexible)
+  - Document the tradeoff: chunk size vs. retrieval precision
+  - Start with Option A, benchmark, then try Option B
+
+Step 6 - Generate embeddings
+  - Load BioBERT or PubMedBERT from HuggingFace
+  - Batch process all trial text chunks through the model
+  - Store embedding vectors alongside trial metadata
+
+Step 7 - Load into vector DB
+  - Set up Qdrant (local Docker) or pgvector extension on Postgres
+  - Design the collection/index schema:
+      payload fields: trial_id, phase, status, condition_mesh_terms
+  - Insert all vectors with metadata payloads
+  - Configure HNSW index parameters (m, ef_construction) and document choices
+
+Step 8 - Build hybrid filtering
+  - Vector similarity search alone returns too many irrelevant results
+  - Add structured pre-filters: phase, status (recruiting/completed), condition
+  - Implement: filter by metadata first, then rank by vector similarity
+
+--------------------------------------------------------------------------------
+PHASE 3: RETRIEVAL INTERFACE + EVALUATION
+--------------------------------------------------------------------------------
+
+Step 9 - Build a query endpoint
+  - FastAPI or Streamlit: user enters a natural language description
+  - Embed the query with the same model
+  - Run filtered ANN search, return top-k trials with metadata
+
+Step 10 - Evaluate retrieval quality
+  - Manually curate 20-30 test queries with known relevant trials
+  - Measure: precision@5, precision@10
+  - Compare: keyword search (BM25) vs. semantic search vs. hybrid
+  - Document which approach wins and why — this is the portfolio story
+
+Step 11 - Document the project
+  - README: problem, data source, architecture diagram, design decisions
+  - Include benchmarks comparing chunking strategies and retrieval methods
+  - Note what you would do differently at production scale
+
+
+================================================================================
+PROJECT 6: GENOMIC VARIANT INTERPRETATION ASSISTANT
+================================================================================
+
+GOAL
+----
+A system that answers natural language questions about genomic variants by
+combining a structured knowledge graph (variant-gene-disease relationships)
+with semantic retrieval over clinical literature. Uses both a graph DB and
+a vector DB together.
+
+SKILLS DEMONSTRATED
+-------------------
+- Graph DB schema design and population
+- Multi-source data integration
+- RAG pipeline architecture
+- Retrieval evaluation (faithfulness, grounding)
+- LLM orchestration with structured + unstructured context
+
+DATA SOURCES
+------------
+- ClinVar (variant-disease classifications): https://www.ncbi.nlm.nih.gov/clinvar/
+- ClinVar XML bulk download for full records
+- Gene Ontology (GO) for gene function annotations
+- PubMed abstracts (via Entrez API) for literature
+
+STACK
+-----
+- Graph DB:       Neo4j (local Docker)
+- Vector DB:      Qdrant or pgvector (reuse from Project 2)
+- Embeddings:     PubMedBERT or OpenAI text-embedding-3-small
+- LLM:            Claude API (claude-sonnet-4-6) for synthesis
+- Orchestration:  Python + LangChain or direct API calls
+- Interface:      Streamlit or FastAPI
+
+--------------------------------------------------------------------------------
+PHASE 1: KNOWLEDGE GRAPH CONSTRUCTION
+--------------------------------------------------------------------------------
+
+Step 1 - Download and parse ClinVar data
+  - Download ClinVar XML or VCF summary files
+  - Parse key fields: variant ID, gene, condition, clinical significance,
+    review status, supporting evidence count
+
+Step 2 - Design the graph schema (ontology first)
+  - Node types:
+      Variant   (id, name, type: SNV/indel/CNV, HGVS notation)
+      Gene      (id, symbol, full_name, chromosome)
+      Disease   (id, name, MedGen_id, OMIM_id)
+      Evidence  (id, source, classification, review_status)
+  - Edge types:
+      (Variant)-[:LOCATED_IN]->(Gene)
+      (Variant)-[:ASSOCIATED_WITH {significance: "Pathogenic"}]->(Disease)
+      (Variant)-[:SUPPORTED_BY]->(Evidence)
+      (Gene)-[:INVOLVED_IN]->(BiologicalProcess)   -- from Gene Ontology
+      (Disease)-[:SUBTYPE_OF]->(Disease)            -- disease hierarchy
+
+Step 3 - Populate the graph
+  - Write ETL to load parsed ClinVar records into Neo4j
+  - Load Gene Ontology annotations and link to Gene nodes
+  - Validate: check node counts, edge counts, spot-check known variants
+    (e.g., BRCA1 c.5266dupC should be Pathogenic for Hereditary Breast Cancer)
+
+Step 4 - Add Gene Ontology enrichment
+  - Download GO annotation file for human genes
+  - Create BiologicalProcess and MolecularFunction nodes
+  - Link genes to their GO terms
+
+--------------------------------------------------------------------------------
+PHASE 2: LITERATURE VECTOR INDEX
+--------------------------------------------------------------------------------
+
+Step 5 - Fetch relevant PubMed abstracts
+  - Use NCBI Entrez API to search for abstracts mentioning variants/genes
+    in your graph
+  - Pull title, abstract, PMID, publication date, MeSH terms
+  - Aim for 50k-200k abstracts (manageable scale for a portfolio project)
+
+Step 6 - Chunk and embed abstracts
+  - Chunk by abstract (one chunk per paper) or split long abstracts
+  - Embed with PubMedBERT
+  - Store vectors in Qdrant with metadata: PMID, gene mentions, disease mentions
+
+Step 7 - Link literature to graph
+  - Where possible, link Evidence nodes in Neo4j to PMIDs in the vector index
+  - This creates a bridge: graph traversal finds relevant evidence nodes,
+    vector search finds the actual abstract text
+
+--------------------------------------------------------------------------------
+PHASE 3: RAG PIPELINE + LLM SYNTHESIS
+--------------------------------------------------------------------------------
+
+Step 8 - Design the retrieval strategy
+  - Two-stage retrieval:
+      Stage 1 (Graph): traverse Neo4j to find variants, genes, diseases,
+                       and linked evidence nodes relevant to the query
+      Stage 2 (Vector): use graph results to seed vector search for
+                        related literature
+  - Combine: structured facts from graph + supporting text from abstracts
+
+Step 9 - Build the query pipeline
+  - Parse user question to extract entities (gene names, variant IDs, diseases)
+  - Run Cypher query to pull structured graph context
+  - Run vector search to retrieve top-k relevant abstracts
+  - Assemble a context payload for the LLM
+
+Step 10 - LLM synthesis with Claude
+  - Send structured prompt to Claude API:
+      System: you are a clinical genomics assistant, answer based only on
+              provided context, cite sources by PMID
+      Context: graph facts + abstract excerpts
+      Question: user query
+  - Return answer with citations
+
+Step 11 - Evaluate the pipeline
+  - Curate 15-20 test questions with known ground-truth answers
+    (use ClinVar's own classifications as ground truth)
+  - Measure:
+      Faithfulness: does the answer contradict the source context?
+      Citation accuracy: are cited PMIDs actually relevant?
+      Graph coverage: does graph traversal find the right nodes?
+  - Use Ragas library for automated faithfulness scoring
+
+Step 12 - Document the project
+  - Architecture diagram showing graph + vector + LLM interaction
+  - Evaluation results comparing graph-only vs. vector-only vs. combined
+  - Discussion of failure cases and what would improve them
+
+
+================================================================================
+SEQUENCING + TIME ESTIMATES
+================================================================================
+
+PROJECT 2 (Clinical Trial Search)
+  Phase 1 - Ingestion + normalization:    2-3 weeks
+  Phase 2 - Embedding pipeline:           1-2 weeks
+  Phase 3 - Interface + evaluation:       1 week
+  Total:                                  4-6 weeks
+
+PROJECT 6 (Variant Interpretation)
+  Phase 1 - Knowledge graph:              3-4 weeks
+  Phase 2 - Literature vector index:      1-2 weeks
+  Phase 3 - RAG pipeline + evaluation:    2-3 weeks
+  Total:                                  6-9 weeks
+
+Overall: 10-15 weeks working part-time (~10hrs/week)
+
+================================================================================
+SHARED INFRASTRUCTURE + SKILLS
+================================================================================
+
+Both projects share:
+- PostgreSQL for raw/staging storage
+- Python ETL scripts
+- Vector DB (Qdrant or pgvector)
+- PubMedBERT embeddings
+
+Build Project 2 first — the embedding pipeline and vector DB setup carry
+directly into Project 6, so you're not starting from scratch.
+
+================================================================================
+PORTFOLIO PRESENTATION TIPS
+================================================================================
+
+For each project, document:
+1. The problem and why it's hard
+2. Dataset characteristics (size, messiness, gaps)
+3. Design decisions and tradeoffs (chunking, schema choices, index params)
+4. Evaluation results with real numbers
+5. What you would do differently at production scale
+
+The evaluation section is what separates this from "I followed a tutorial."
+Hiring managers want to see that you can reason about quality, not just
+wire up tools.

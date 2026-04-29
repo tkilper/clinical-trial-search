@@ -1,0 +1,94 @@
+version: '3.8'
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY:?Set AIRFLOW_FERNET_KEY in .env}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:?Set AIRFLOW_SECRET_KEY in .env}
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: '30'
+    PYTHONPATH: /opt/airflow
+    CLINICAL_TRIALS_DB_DSN: >-
+      host=postgres dbname=clinical_trials
+      user=${POSTGRES_USER:-postgres} password=${POSTGRES_PASSWORD:-postgres}
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./etl:/opt/airflow/etl
+    - ./sql:/opt/airflow/sql
+    - airflow_logs:/opt/airflow/logs
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql/init:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  qdrant:
+    image: qdrant/qdrant:v1.9.2
+    ports:
+      - "6333:6333"   # REST API + UI
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -c "
+        airflow db migrate &&
+        airflow users create
+          --username admin --password admin
+          --firstname Admin --lastname User
+          --role Admin --email admin@example.com
+        2>/dev/null || true
+      "
+    restart: "no"
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: airflow webserver
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: airflow scheduler
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  postgres_data:
+  qdrant_data:
+  airflow_logs:

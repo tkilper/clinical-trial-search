@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from cryptography.fernet import Fernet; print\\('FERNET:', Fernet.generate_key\\(\\).decode\\(\\)\\)\")",
+      "Bash(python3 -c \"from cryptography.fernet import Fernet; print\\('FERNET:', Fernet.generate_key\\(\\).decode\\(\\)\\)\")",
+      "PowerShell(python -c \"from cryptography.fernet import Fernet; import secrets; print\\('FERNET=' + Fernet.generate_key\\(\\).decode\\(\\)\\); print\\('SECRET=' + secrets.token_hex\\(32\\)\\)\")",
+      "PowerShell(pip install *)"
+    ]
+  }
+}
